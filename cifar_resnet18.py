@@ -45,20 +45,24 @@ def make_resnet18_block(depth, inp_chn, out_chn, stride = 2):
 
 class cifar_resnet18(nn.Module):
 
-    def __init__(self, num_class = 10):
+    def __init__(self, num_class = 10, expansion = 2):
+        '''
+        expansion: standard resnet-18 has channels as [16, 32, 64]
+                   expand the channel in standard resnet-18
+        '''
 
         super(cifar_resnet18, self).__init__()
         self.conv1 = nn.Conv2d(3, 16, kernel_size = 3, stride = 1, padding = 1)
 
         self.bn1 = nn.BatchNorm2d(16)
 
-        self.block1 = make_resnet18_block(2, 16, 32, stride = 1)
-        self.block2 = make_resnet18_block(3, 32, 64, stride = 2)
-        self.block3 = make_resnet18_block(4, 64, 128, stride = 2)
+        self.block1 = make_resnet18_block(2, 16, 16 * expansion, stride = 1)
+        self.block2 = make_resnet18_block(3, 16 * expansion, 32 * expansion, stride = 2)
+        self.block3 = make_resnet18_block(4, 32 * expansion, 64 * expansion, stride = 2)
 
         self.global_avg_pool = nn.AvgPool2d(kernel_size = 8)
 
-        self.fc = nn.Linear(128, num_class)
+        self.fc = nn.Linear(64 * expansion, num_class)
 
         self.kaiming_init()
     def forward(self, inp):

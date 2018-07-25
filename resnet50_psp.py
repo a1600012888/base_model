@@ -1,19 +1,28 @@
 import torch
 import torch.nn as nn
-
+import numpy as np
 import torch.nn.functional as F
+import torch.utils.model_zoo as model_zoo
 
-
+model_urls = {
+    'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
+    'resnet34': 'https://download.pytorch.org/models/resnet34-333f7ec4.pth',
+    'resnet50': 'https://download.pytorch.org/models/resnet50-19c8e357.pth',
+    'resnet101': 'https://download.pytorch.org/models/resnet101-5d3b4d8f.pth',
+    'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
+}
 
 class conv_bn_relu(nn.Module):
 
     def __init__(self, in_chn, out_chn, kernel_size = 3, stride = 1, padding = 1, dilation = 1,
-                 has_bias = False, has_bn = rue, has_relu = True):
+                 has_bias = False, has_bn = True, has_relu = True):
 
         super(conv_bn_relu, self).__init__()
 
-        self.conv = nn.Conv2d(in_chn, out_chn, kernel_size, stride, padding, dilation, has_bias)
+        self.conv = nn.Conv2d(in_chn, out_chn, kernel_size, stride, padding, dilation, bias = has_bias)
 
+        self.bn = None
+        self.relu = None
         if has_bn:
             self.bn = nn.BatchNorm2d(out_chn)
 
@@ -75,8 +84,8 @@ def make_stage(in_chn, mid_chn, out_chn, num_bottles, enable_stride = True):
 
 class resnet50_psp(nn.Module):
 
-    def __init__(self):
-
+    def __init__(self, pretrained = True):
+        super(resnet50_psp, self).__init__()
         self.conv1 = conv_bn_relu(in_chn=3, out_chn=64, kernel_size=3, stride = 2)
 
         self.conv2 = conv_bn_relu(in_chn=64, out_chn=64)
@@ -96,6 +105,8 @@ class resnet50_psp(nn.Module):
         self.stage3 = make_stage(outputs[1], mild_outputs[2], outputs[2], enable_stride[2])
         self.stage4 = make_stage(outputs[2], mild_outputs[3], outputs[3], enable_stride[3])
 
+        if pretrained:
+            self.load_state_dict(model_zoo.load_url(model_urls['resnet50']), strict=False)
     def forward(self, x):
         x = self.conv1(x)
         x = self.conv2(x)
@@ -122,10 +133,11 @@ class psp_branch(nn.Module):
     def forward(self, x):
         h, w = x.size(2), x.size(3)
         x = self.pool(x)
+        #print(x.size())
         x = self.conv_reduce(x)
 
         x = F.upsample(x, size = (h, w), mode = 'bilinear')
-        
+
         return x
 
 class pspModule(nn.Module):
@@ -166,9 +178,10 @@ class predictBranch(nn.Module):
         :param nb_class: channels of the final prediction
         :param size: size of the final output: (h, w)
         '''
+        super(predictBranch, self).__init__()
         self.conv1 = conv_bn_relu(in_chn, mid_chn)
 
-        self.drop = nn.Dropout2d(p = 1, inplace=True)
+        self.drop = nn.Dropout2d(p = 1, inplace=False)
 
         self.conv2 = conv_bn_relu(mid_chn, nb_class, 1, 1, 0, has_bias=True, has_relu=False, has_bn=False)
 
@@ -187,7 +200,7 @@ class PSP(nn.Module):
     backbone as resnet-50
     '''
 
-    def __init__(self, nb_class):
+    def __init__(self, nb_class, size = (480, 480)):
 
         super(PSP, self).__init__()
 
@@ -195,9 +208,9 @@ class PSP(nn.Module):
 
         self.psp = pspModule(in_chn=2048)
 
-        self.score = predictBranch(4096, 512, 150, size = (480, 480))
+        self.score = predictBranch(4096, 512, nb_class, size = size)
 
-        self.aux = predictBranch(1024, 1024, 150, size = (480, 480))
+        self.aux = predictBranch(1024, 1024, nb_class, size = size)
 
     def forward(self, x):
 
@@ -210,3 +223,27 @@ class PSP(nn.Module):
         aux_pred = self.aux(x3)
 
         return pred, aux_pred
+
+
+def test():
+
+    net = PSP(3, size = (512, 256))
+    inp = torch.randn(2, 3, 512, 256)
+
+    pred, x = net(inp)
+
+    print(pred.size())
+
+
+def test_res():
+    net = resnet50_psp()
+
+    inp = torch.randn(2, 3, 512, 256)
+
+    s4, s3 = net(inp)
+
+    print(s4.size())
+    print(s3.size())
+if __name__ == '__main__':
+    test()
+    #test_res()
